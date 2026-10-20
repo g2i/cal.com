@@ -4,6 +4,21 @@
 ARG NODE_VERSION=20.7.0
 FROM node:${NODE_VERSION}-slim as base
 
+# Temporary eMudhra mitigation until the Node image contains the upstream key blocklist.
+# Remove both emSign trust anchors and the alternate AAA cross-signing anchor.
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends openssl ca-certificates && \
+    sed -i -e '/^mozilla\/emSign_ECC_Root_CA_-_G3.crt$/s/^/!/' \
+        -e '/^mozilla\/emSign_Root_TLS_CA_-_G3.crt$/s/^/!/' \
+        -e '/^mozilla\/Comodo_AAA_Services_root.crt$/s/^/!/' /etc/ca-certificates.conf && \
+    update-ca-certificates --fresh && \
+    mkdir -p /etc/ssl/empty-ca && \
+    rm -rf /var/lib/apt/lists/*
+ENV NODE_OPTIONS="--use-openssl-ca" \
+    SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt" \
+    SSL_CERT_DIR="/etc/ssl/empty-ca"
+RUN node -e 'const fs=require("node:fs"); const {X509Certificate}=require("node:crypto"); const roots=fs.readFileSync(process.env.SSL_CERT_FILE,"utf8").match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g)||[]; if(roots.length<100 || roots.some(p=>/CN=(emSign ECC Root CA - G3|emSign Root TLS CA - G3|AAA Certificate Services)(\n|$)/.test(new X509Certificate(p).subject))) throw Error("Unmitigated default TLS trust store")'
+
 ARG DATABASE_URL
 
 # Next.js/Prisma app lives here
